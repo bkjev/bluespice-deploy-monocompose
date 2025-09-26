@@ -1,0 +1,167 @@
+name: bluespice
+
+x-common-environment: &common-environment
+  VERSION: ${VERSION}
+  EDITION: ${EDITION}
+  TZ: ${TZ:-UTC}
+
+  WIKI_NAME: ${WIKI_NAME}
+  WIKI_LANG: ${WIKI_LANG}
+  WIKI_PASSWORDSENDER: ${WIKI_PASSWORDSENDER}
+  WIKI_EMERGENCYCONTACT: ${WIKI_EMERGENCYCONTACT}
+  WIKI_HOST: ${WIKI_HOST}
+  WIKI_PORT: ${WIKI_PORT}
+  WIKI_PROTOCOL: ${WIKI_PROTOCOL}
+  WIKI_BASE_PATH: ${WIKI_BASE_PATH:-/}
+
+
+  DB_USER: ${DB_USER}
+  DB_PASS: ${DB_PASS}
+  DB_ROOT_USER: ${DB_ROOT_USER}
+  DB_ROOT_PASS: ${DB_ROOT_PASS}
+  DB_HOST: ${DB_HOST}
+  DB_NAME: ${DB_NAME}
+  DB_PREFIX: ${DB_PREFIX}
+
+  SMTP_HOST: ${SMTP_HOST}
+  SMTP_PORT: ${SMTP_PORT}
+  SMTP_USER: ${SMTP_USER}
+  SMTP_PASS: ${SMTP_PASS}
+  SMTP_ID_HOST: ${SMTP_ID_HOST}
+
+  ### From helper service ###
+  DATADIR: ${DATADIR}
+
+
+services:
+  ### From main service ###
+  wiki-web:
+    image: ${BLUESPICE_WIKI_IMAGE}
+    container_name: bluespice-wiki-web
+    restart: unless-stopped
+    environment:
+      <<: *common-environment
+      VIRTUAL_HOST: ${WIKI_HOST}
+      VIRTUAL_PATH: /
+      VIRTUAL_PORT: 9090
+      LETSENCRYPT_HOST: ${WIKI_HOST}
+    command: start-web
+
+    volumes:
+      - ${DATADIR}/wiki:/data
+    depends_on:
+      upgrade:
+        condition: service_completed_successfully
+      search:
+        condition: service_healthy
+
+  wiki-task:
+    image: ${BLUESPICE_WIKI_IMAGE}
+    container_name: bluespice-wiki-task
+    restart: unless-stopped
+    command: ["start-task --runAll"]
+    environment:
+      <<: *common-environment
+      BACKUP_HOUR: ${BACKUP_HOUR}
+    volumes:
+      - ${DATADIR}/wiki:/data
+    depends_on:
+      upgrade:
+        condition: service_completed_successfully
+      search:
+        condition: service_healthy
+
+  ### From persistent data services ###
+  search:
+    image: ${BLUESPICE_SERVICE_REPOSITORY}/search:${VERSION}
+    container_name: bluespice-search
+    restart: unless-stopped
+    volumes:
+      - ${DATADIR}/search:/usr/share/opensearch/data
+    healthcheck:
+      test: curl -f http://localhost:9200
+      start_period: 5s
+      interval: 5s
+      timeout: 5s
+      retries: 10
+    depends_on:
+      prepare:
+        condition: service_completed_successfully
+
+
+  ### From stateless services ###
+  cache:
+    image: ${BLUESPICE_SERVICE_REPOSITORY}/cache:${VERSION}
+    container_name: bluespice-cache
+    restart: unless-stopped
+  pdf:
+    image: ${BLUESPICE_SERVICE_REPOSITORY}/pdf:${VERSION}
+    container_name: bluespice-pdf
+    restart: unless-stopped
+  
+  formula:
+    image: ${BLUESPICE_SERVICE_REPOSITORY}/formula:${VERSION}
+    container_name: bluespice-formula
+    restart: unless-stopped
+
+  diagram:
+    image: ${BLUESPICE_SERVICE_REPOSITORY}/diagram:${VERSION}
+    container_name: bluespice-diagram 
+    restart: unless-stopped
+    environment:
+      VIRTUAL_HOST: ${WIKI_HOST}
+      VIRTUAL_PATH: ${WIKI_BASE_PATH:-/}_diagram/
+      VIRTUAL_PORT: 8080
+      VIRTUAL_DEST: /
+
+  ### From helper service ###
+  prepare:
+    image: ${BLUESPICE_SERVICE_REPOSITORY}/helper:${VERSION}
+    container_name: bluespice-prepare
+    volumes:
+      - ${DATADIR}:/data
+    restart: no
+    command: ["prepare-bluespice"]
+  upgrade:
+    image: ${BLUESPICE_SERVICE_REPOSITORY}/helper:${VERSION}
+    container_name: bluespice-upgrade
+    volumes:
+      - ${DATADIR}:/data
+      - /var/run/docker.sock:/var/run/docker.sock
+    environment:
+      <<: *common-environment
+
+    restart: no
+    command: ${UPGRADE_ACTION}
+  
+  ### From proxy service (nginx) ###
+  proxy:
+    image: ${BLUESPICE_SERVICE_REPOSITORY}/proxy:${VERSION}
+    container_name: bluespice-proxy
+    restart: unless-stopped
+    ports:
+      - "443:443"
+      - "80:80"
+    volumes:
+      - ${DATADIR}/proxy/vhost.d:/etc/nginx/vhost.d
+      - ${DATADIR}/proxy/html:/usr/share/nginx/html
+      - ${DATADIR}/proxy/certs:/etc/nginx/certs:rw
+      - /var/run/docker.sock:/tmp/docker.sock:ro
+    labels:
+      - com.github.nginx-proxy.nginx=true
+
+  ### From proxy service (letsencrypt) ###
+  letsencrypt:
+    image: nginxproxy/acme-companion
+    container_name: bluespice-letsencrypt-service
+    restart: unless-stopped
+    environment:
+      - DEFAULT_EMAIL=${ADMIN_MAIL}
+      - NGINX_PROXY_CONTAINER=proxy
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+      - ${DATADIR}/letsencrypt:/etc/acme.sh
+    volumes_from:
+      - proxy
+    depends_on:
+      - proxy
