@@ -16,9 +16,15 @@ Dieser Fork konsolidiert die ursprüngliche, modular aufgebaute BlueSpice-Deploy
 
 ## Schnellstart
 
-1) Umgebungsvariablen setzen
+1) `.env` erstellen (siehe `compose/.env.sample` als Vorlage) und mindestens setzen:
+- `VERSION` (BlueSpice Version)
+- `BLUESPICE_WIKI_IMAGE` (oder `EDITION` und Image-Standard verwenden)
+- `WIKI_HOST`, `WIKI_PROTOCOL`, `WIKI_PORT`
+- Datenverzeichnis: `DATADIR`
+- Datenbank-Konfiguration (extern), z. B. `DB_HOST`, `DB_NAME`, `DB_USER`, `DB_PASS`
+- **Wichtig:** Variablen aus dem ursprünglichen deploy-Skript (siehe Abschnitt unten)
 
-2) Start (ohne Let’s Encrypt):
+2) Start (ohne Let's Encrypt):
 ```bash
 docker compose up -d
 ```
@@ -84,7 +90,36 @@ Siehe auch `README_ORIGINAL.md` für eine detaillierte Tabelle. Mindestens:
 - `VERSION`/`EDITION` bzw. `BLUESPICE_WIKI_IMAGE` – Imageauswahl
 - `WIKI_HOST`, `WIKI_PORT`, `WIKI_PROTOCOL`, `WIKI_BASE_PATH`
 - DB-Variablen wie oben
-- Optional Proxy/TLS: `ADMIN_MAIL` (Let’s Encrypt)
+- Optional Proxy/TLS: `ADMIN_MAIL` (Let's Encrypt)
+
+### Variablen aus dem ursprünglichen deploy-Skript
+
+Das ursprüngliche `bluespice-deploy` Skript setzt automatisch folgende Variablen, die du jetzt manuell in `.env` setzen musst:
+
+**Automatisch gesetzte Variablen:**
+- `UPGRADE_ACTION` – Standard: `"sleep 1"`, für Upgrades: `"/app/bin/upgrade-pipeline"` oder `"/app/bin/upgrade-pipeline -f"`
+- `TZ` – Automatisch aus System-Zeitzone, Standard: `UTC`
+- `BLUESPICE_SERVICE_REPOSITORY` – Standard: `bluespice`, kann via `SERVICES_REPOSITORY_PATH` überschrieben werden
+
+**Image-Auswahl-Logik:**
+- Bei `EDITION=pro` oder `EDITION=farm`: `BLUESPICE_WIKI_IMAGE=docker.bluespice.com/bluespice-${EDITION}/wiki:${VERSION}`
+- Sonst: `BLUESPICE_WIKI_IMAGE=bluespice/wiki:${VERSION}`
+- Kann via `BLUESPICE_WIKI_IMAGE` überschrieben werden
+
+**Beispiel `.env` Ergänzungen:**
+```bash
+# Upgrade-Verhalten
+UPGRADE_ACTION=sleep 1
+
+# Zeitzone
+TZ=Europe/Berlin
+
+# Service-Repository (Standard: bluespice)
+BLUESPICE_SERVICE_REPOSITORY=bluespice
+
+# Wiki-Image (wird automatisch aus EDITION/VERSION gesetzt, kann überschrieben werden)
+BLUESPICE_WIKI_IMAGE=bluespice/wiki:5.1.0
+```
 
 ---
 
